@@ -7,10 +7,15 @@ import sys
 
 from pydantic import ValidationError
 
-from pitch_pipeline.config import PipelineConfig, format_validation_error, load_config_from_environment
+from pitch_pipeline.config import (
+    PipelineConfig,
+    format_validation_error,
+    load_config_from_environment,
+)
 from pitch_pipeline.detector import MaskFieldDetector
-from pitch_pipeline.errors import PipelineError
+from pitch_pipeline.errors import PipelineError, ReportingError
 from pitch_pipeline.pipeline import PitchBoundaryPipeline
+from pitch_pipeline.reporting import HttpJobReporter, JobReporter, NullJobReporter
 from synthetic_generator import generate_synthetic_video
 
 
@@ -28,13 +33,17 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
+    reporter = _create_reporter(config)
+
     try:
         _generate_video_when_needed(config)
         detector = MaskFieldDetector(config.detector)
-        pipeline = PitchBoundaryPipeline(config, detector)
+        pipeline = PitchBoundaryPipeline(config, detector, reporter)
         result = pipeline.run()
+        reporter.report_completion(result)
     except PipelineError as error:
         logging.exception("pipeline failed")
+        _report_failure_safely(reporter, str(error))
         print(f"Pipeline failed: {error}", file=sys.stderr)
         return 1
 
@@ -47,6 +56,20 @@ def main() -> int:
     )
 
     return 0
+
+
+def _create_reporter(config: PipelineConfig) -> JobReporter:
+    if not config.reporting.enabled:
+        return NullJobReporter()
+
+    return HttpJobReporter(config.reporting)
+
+
+def _report_failure_safely(reporter: JobReporter, message: str) -> None:
+    try:
+        reporter.report_failure(message)
+    except ReportingError:
+        logging.exception("could not report pipeline failure")
 
 
 def _generate_video_when_needed(config: PipelineConfig) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 
 import cv2
 from shapely.geometry import Polygon
@@ -11,6 +12,7 @@ from pitch_pipeline.config import PipelineConfig
 from pitch_pipeline.detector import FieldDetector
 from pitch_pipeline.errors import VideoInputError
 from pitch_pipeline.models import FrameResult, PipelineMetrics, PipelineResult
+from pitch_pipeline.reporting import JobReporter, NullJobReporter
 
 logger = logging.getLogger(__name__)
 DEFAULT_SOURCE_FPS = 30.0
@@ -19,9 +21,15 @@ DEFAULT_SOURCE_FPS = 30.0
 class PitchBoundaryPipeline:
     """Process a video feed and collect pitch boundary detections."""
 
-    def __init__(self, config: PipelineConfig, detector: FieldDetector) -> None:
+    def __init__(
+        self,
+        config: PipelineConfig,
+        detector: FieldDetector,
+        reporter: JobReporter | None = None,
+    ) -> None:
         self._config = config
         self._detector = detector
+        self._reporter = reporter or NullJobReporter()
 
     def run(self) -> PipelineResult:
         """Run the configured pipeline against the configured video path."""
@@ -31,7 +39,8 @@ class PitchBoundaryPipeline:
         if not capture.isOpened():
             raise VideoInputError(f"could not open video: {self._config.video_path}")
 
-        metrics = PipelineMetrics()
+        total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        metrics = PipelineMetrics(total_frames=total_frames)
         frame_results: list[FrameResult] = []
 
         try:
@@ -58,6 +67,7 @@ class PitchBoundaryPipeline:
         source_fps = capture.get(cv2.CAP_PROP_FPS) or DEFAULT_SOURCE_FPS
         frame_interval = self._config.frame_sampling.frame_interval(source_fps)
         outer_boundary = self._build_outer_boundary(capture)
+        next_report_at = perf_counter()
 
         while True:
             has_frame, frame = capture.read()
@@ -73,6 +83,7 @@ class PitchBoundaryPipeline:
 
             metrics.frames_sampled += 1
             self._process_sampled_frame(metrics, frame_results, outer_boundary, frame)
+            next_report_at = self._report_progress_when_due(metrics, next_report_at)
 
     def _process_sampled_frame(
         self,
@@ -112,3 +123,12 @@ class PitchBoundaryPipeline:
     def _should_sample_frame(self, frame_number: int, frame_interval: int) -> bool:
         return frame_number == 1 or frame_number % frame_interval == 0
 
+    def _report_progress_when_due(self, metrics: PipelineMetrics, next_report_at: float) -> float:
+        now = perf_counter()
+
+        if now < next_report_at:
+            return next_report_at
+
+        self._reporter.report_progress(metrics)
+
+        return now + self._config.reporting.progress_interval_seconds

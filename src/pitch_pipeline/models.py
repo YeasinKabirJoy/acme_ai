@@ -30,6 +30,7 @@ class FrameResult:
 class PipelineMetrics:
     """Counters describing a pipeline run."""
 
+    total_frames: int = 0
     frames_seen: int = 0
     frames_sampled: int = 0
     frames_skipped: int = 0
@@ -61,6 +62,30 @@ class PipelineMetrics:
 
         return self.valid_detections / self.frames_sampled
 
+    @property
+    def progress_percent(self) -> float:
+        """Return approximate video progress as a percentage."""
+
+        if self.total_frames <= 0:
+            return 0.0
+
+        return min(100.0, (self.frames_seen / self.total_frames) * 100)
+
+    def to_summary(self) -> dict[str, float | int]:
+        """Return serializable metrics for job event payloads."""
+
+        return {
+            "total_frames": self.total_frames,
+            "frames_seen": self.frames_seen,
+            "frames_sampled": self.frames_sampled,
+            "frames_skipped": self.frames_skipped,
+            "valid_detections": self.valid_detections,
+            "invalid_detections": self.invalid_detections,
+            "failed_frames": self.failed_frames,
+            "duration_seconds": round(self.duration_seconds, 3),
+            "detection_rate": round(self.detection_rate, 4),
+        }
+
 
 @dataclass(frozen=True)
 class PipelineResult:
@@ -68,4 +93,3 @@ class PipelineResult:
 
     metrics: PipelineMetrics
     frame_results: list[FrameResult]
-
