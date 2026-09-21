@@ -6,3 +6,6 @@ venv/
 .idea/
 .vscode/
 .pytest_cache/
+.test-output/
+pytest-cache-files-*/
+.ruff_cache/

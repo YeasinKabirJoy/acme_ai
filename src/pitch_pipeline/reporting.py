@@ -6,7 +6,7 @@ import logging
 from typing import Literal, Protocol
 
 import requests
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field
 
 from pitch_pipeline.config import ReportingConfig
 from pitch_pipeline.errors import ReportingError
